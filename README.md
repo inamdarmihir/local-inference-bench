@@ -1,4 +1,4 @@
-# qdrant-local-inference-bench
+# local-inference-bench
 
 Running an embedding model locally alongside Qdrant, instead of calling an
 external API for every embedding, is a real latency and cost lever. Most
