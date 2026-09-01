@@ -9,7 +9,7 @@ the other side from real published numbers, because no billed API key is
 available in this environment.
 
 The corpus is real: every markdown file in `/Users/apple/Downloads/articles/`
-and `/Users/apple/Downloads/aihive-posts-ready/`, which are Mihir's own
+and `/Users/apple/Downloads/aihive-posts-ready/`, this project's own
 Qdrant Stars article drafts and their publish-ready copies (five pieces,
 twice each: a draft and a formatted version with frontmatter). 38 chunks,
 8,091 words, 13,111 tokens by the actual `text-embedding-3-small` tokenizer.
@@ -50,6 +50,34 @@ billed call against the same corpus and write `results_api.json` in the
 same shape. It requires `--confirm` because it spends real money. This
 repo's own numbers below don't include anything from that script, since it
 was never run here.
+
+## Running this against your own corpus and comparing your own cost tradeoff
+
+Everything here is generic once you swap the corpus in `corpus.py`:
+
+1. Edit `CORPUS_DIRS` in [`corpus.py`](corpus.py) to point at your own
+   directory (or directories) of markdown files. Nothing else in that
+   module assumes anything about this project's specific content, chunking
+   is paragraph-based with a 200-400 word target, independent of source.
+2. Run `python3 run_local_benchmark.py --out results_local.json` to get a
+   real local-throughput number on your own hardware, against your own
+   corpus size.
+3. Run `python3 cost_comparison.py results_local.json` to project that
+   measured rate against OpenAI's current per-token price and a rented
+   cloud-CPU price, both of which are plain constants near the top of
+   `cost_comparison.py`, edit them if you're pricing a different model or
+   instance type.
+4. If you have a real `OPENAI_API_KEY` and want an actual (not projected)
+   API-side number, `run_external_api.py --confirm` embeds the same corpus
+   through `text-embedding-3-small` and writes `results_api.json` in the
+   same shape as the local results, so it can be compared directly instead
+   of against a cited price alone.
+
+The one hard requirement carried over from this repo's own run: whatever
+local model you use, keep the vector dimension consistent across whatever
+you're comparing it to, or a downstream Qdrant recall comparison (not
+something this repo does, but the natural next step) won't be apples to
+apples.
 
 ## What was actually measured (this machine, this run)
 

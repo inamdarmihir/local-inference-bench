@@ -3,9 +3,11 @@ corpus.py
 
 Loads the real document corpus for this benchmark: every markdown file in
 /Users/apple/Downloads/articles/ and /Users/apple/Downloads/aihive-posts-ready/.
-These are Mihir's own Qdrant Stars article drafts and their published
+These are this project's own Qdrant Stars article drafts and their published
 versions (same five pieces, draft and publish-ready copies), used as-is
 because they're real prose sitting on disk, not text generated for this repo.
+To point this at a different corpus, edit CORPUS_DIRS below to your own
+directory of markdown files; nothing else in this module is corpus-specific.
 
 No synthetic text anywhere in this file. Chunking is paragraph-based: walk
 each document's paragraphs in order and pack them into a chunk until adding
