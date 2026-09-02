@@ -1,37 +1,32 @@
 """
 cost_comparison.py
 
-Computes the cost side of the local-vs-API comparison using:
-  - the real corpus (corpus.py) and a real token count from tiktoken
-  - the real measured local throughput from run_local_benchmark.py's output
-    (results_local_warm.json by default)
-  - OpenAI's own published price for text-embedding-3-small, cited below
-    with the date it was checked
-  - a cited real cloud on-demand hourly rate, as the stated "rent
-    equivalent compute" hardware-cost assumption
-
-No number here is invented. What's measured (this machine, this corpus)
-and what's cited (external, dated) is kept in separate variables and
-labeled as such in the printed output, not blended into one figure.
+Combines a real, locally measured FastEmbed throughput number (from
+run_local_benchmark.py's JSON output) with cited, dated external prices for
+OpenAI's API and a comparable rented cloud CPU instance, to compare local
+vs. hosted embedding cost. Every number printed or written is tagged as
+"measured" (this machine, this run), "cited" (external, dated, not
+reproduced here), or "projected" (linear extrapolation of a measured rate),
+so the three are never blended into one unlabeled figure.
 
 Sources, checked 2026-09-01:
   - OpenAI text-embedding-3-small price: $0.02 / 1M tokens.
     https://platform.openai.com/docs/models/text-embedding-3-small
-    (redirects to https://developers.openai.com/api/docs/models/text-embedding-3-small)
   - AWS EC2 c7g.xlarge (4 vCPU, 8 GiB, Graviton3) on-demand price:
-    $0.145/hr, us-east-1.
-    https://instances.vantage.sh/aws/ec2/c7g.xlarge
-    Picked as a roughly comparable small CPU instance to this dev
-    machine (Apple M2, 8 cores / 8 GB), not an exact hardware match,
-    vCPU count differs (4 vs 8).
+    $0.145/hr, us-east-1. https://instances.vantage.sh/aws/ec2/c7g.xlarge
+    Picked as a roughly comparable small CPU instance, not an exact
+    hardware match to whatever machine produced the local numbers.
 """
 
+import argparse
 import json
-import sys
+from pathlib import Path
 
 import tiktoken
 
 from corpus import load_corpus
+
+DEFAULT_CORPUS_DIR = Path("sample_corpus")
 
 # --- cited, dated external numbers (not measured on this machine) ---
 OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS = 0.02
@@ -59,21 +54,66 @@ def load_local_results(path: str) -> dict:
         return json.load(f)
 
 
-def main():
-    local_results_path = sys.argv[1] if len(sys.argv) > 1 else "results_local_warm.json"
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Compare measured local FastEmbed cost against cited "
+        "hosted-API pricing for the same corpus."
+    )
+    parser.add_argument(
+        "local_results",
+        nargs="?",
+        default="results_local_warm.json",
+        metavar="LOCAL_RESULTS_JSON",
+        help="Path to a JSON file written by run_local_benchmark.py "
+        "(default: results_local_warm.json, the published warm-run "
+        "numbers). Must be measured against the same corpus passed to "
+        "--corpus-dir, or the token count and throughput won't match.",
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        action="append",
+        dest="corpus_dirs",
+        metavar="PATH",
+        help="Directory of markdown files to count tokens for. Repeatable. "
+        "Defaults to the in-repo sample_corpus/ directory if omitted; use "
+        "the same --corpus-dir you passed to run_local_benchmark.py.",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        help="Optional path to also write the comparison as JSON, with an "
+        "explicit 'source' field (measured/cited/projected/"
+        "measured+cited) on every numeric group.",
+    )
+    args = parser.parse_args()
+
+    local_results_path = args.local_results
     try:
         local = load_local_results(local_results_path)
     except FileNotFoundError:
-        print(
+        raise SystemExit(
             f"{local_results_path} not found. Run run_local_benchmark.py "
-            f"first (it writes results_local.json by default; pass that "
-            f"path here, or rerun with --out results_local_warm.json)."
+            f"first (it writes results_local.json by default), then pass "
+            f"that path here."
         )
-        sys.exit(1)
 
-    chunks = load_corpus()
+    corpus_dirs = args.corpus_dirs or [DEFAULT_CORPUS_DIR]
+    chunks = load_corpus(corpus_dirs)
     documents = [c.text for c in chunks]
     total_tokens = real_token_count(documents)
+
+    published_num_chunks = local.get("corpus", {}).get("num_chunks")
+    if published_num_chunks is not None and published_num_chunks != len(chunks):
+        print(
+            f"warning: {local_results_path} was measured against "
+            f"{published_num_chunks} chunks, but {[str(d) for d in corpus_dirs]} "
+            f"produced {len(chunks)} chunks. Token counts and cost below are "
+            f"computed from the corpus you pointed --corpus-dir at, not the "
+            f"corpus that produced {local_results_path}'s throughput numbers. "
+            f"Pass the matching --corpus-dir for an apples-to-apples "
+            f"comparison, e.g. the --corpus-dir you gave run_local_benchmark.py.\n"
+        )
 
     bench = local["benchmark"]
     docs_per_second = bench["documents_per_second"]
@@ -126,6 +166,7 @@ def main():
     print()
 
     # --- projection, explicitly labeled as a projection, not a new measurement ---
+    projections: list[dict] = []
     for scale_docs in (10_000, 1_000_000):
         scale_factor = scale_docs / len(chunks)
         proj_tokens = total_tokens * scale_factor
@@ -156,6 +197,18 @@ def main():
         )
         print()
 
+        projections.append(
+            {
+                "source": "projected",
+                "scale_docs": scale_docs,
+                "projected_tokens": proj_tokens,
+                "projected_api_cost_usd": proj_api_cost,
+                "projected_local_seconds": proj_local_seconds,
+                "projected_local_rented_cost_usd": proj_local_rented_cost,
+                "projected_local_owned_cost_usd": 0.0,
+            }
+        )
+
     print("=" * 72)
     print("LATENCY: NOT INDEPENDENTLY MEASURED FOR THE API PATH")
     print("=" * 72)
@@ -166,6 +219,44 @@ def main():
         "citation as a related-but-not-directly-applicable data point "
         "(different model, tested in 2023, single-sentence inputs)."
     )
+
+    if args.out:
+        out = {
+            "corpus": {
+                "source": "measured",
+                "num_chunks": len(chunks),
+                "total_tokens": total_tokens,
+                "corpus_dirs": [str(d) for d in corpus_dirs],
+                "local_results_file": local_results_path,
+            },
+            "local_benchmark": {
+                "source": "measured",
+                "model_name": bench["model_name"],
+                "wall_clock_seconds": wall_clock,
+                "documents_per_second": docs_per_second,
+                "cpu_brand": bench["cpu_brand"],
+                "cpu_cores": bench["cpu_cores"],
+            },
+            "cited_pricing": {
+                "source": "cited",
+                "openai_usd_per_1m_tokens": OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS,
+                "openai_pricing_source": OPENAI_PRICING_SOURCE,
+                "openai_pricing_checked_date": OPENAI_PRICING_CHECKED_DATE,
+                "aws_c7g_xlarge_usd_per_hour": AWS_C7G_XLARGE_USD_PER_HOUR,
+                "aws_pricing_source": AWS_PRICING_SOURCE,
+                "aws_pricing_checked_date": AWS_PRICING_CHECKED_DATE,
+            },
+            "cost_at_corpus_size": {
+                "source": "measured+cited",
+                "api_cost_usd": api_cost_this_corpus,
+                "local_cost_rented_usd": local_cost_rented_compute,
+                "local_cost_owned_usd": 0.0,
+            },
+            "projections": projections,
+        }
+        with open(args.out, "w") as f:
+            json.dump(out, f, indent=2)
+        print(f"\nWrote {args.out}")
 
 
 if __name__ == "__main__":

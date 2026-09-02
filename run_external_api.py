@@ -1,31 +1,33 @@
 """
 run_external_api.py
 
-The external-API counterpart to run_local_benchmark.py, for anyone who
-has a real OpenAI API key and wants to measure live latency themselves
-against this same corpus. This repo's own README does NOT report numbers
-from this script, because this environment has no API key and no billed
-call was made. Running it makes a real, billed OpenAI API call.
+The external-API counterpart to run_local_benchmark.py, for anyone who has
+a real OpenAI API key and wants to measure live latency themselves against
+their own corpus. Uses `client.embeddings.create(input=..., model=...)`
+from openai==3.6.0, which returns a CreateEmbeddingResponse with `.data`
+and `.usage.total_tokens`.
 
-Call signature verified against the installed SDK directly this session
-(`python3 -c "from openai.resources.embeddings import Embeddings; import
-inspect; print(inspect.signature(Embeddings.create))"` on openai==3.6.0):
-client.embeddings.create(input=..., model=...) returns a
-CreateEmbeddingResponse with .data (one entry per input) and
-.usage.total_tokens.
+This script was never run to produce this repo's published numbers
+(results_local.json, results_local_warm.json, or the README's cost table):
+no OPENAI_API_KEY was available when those were generated, so no billed
+call was made. Running this script yourself makes a real, billed OpenAI
+API call against whatever corpus you point it at.
 
 Usage (requires OPENAI_API_KEY in the environment):
-    python3 run_external_api.py --out results_api.json
+    python3 run_external_api.py --corpus-dir sample_corpus --confirm
 """
 
 import argparse
 import json
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from openai import OpenAI
 
 from corpus import load_corpus
+
+DEFAULT_CORPUS_DIR = Path("sample_corpus")
 
 # Cited, dated. See cost_comparison.py for the source and check date.
 # Kept here too so this script's own cost math doesn't depend on importing
@@ -72,12 +74,32 @@ def run_external_api(
     )
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Makes real, billed OpenAI API calls. Requires OPENAI_API_KEY."
+        description="Makes real, billed OpenAI API calls against a markdown "
+        "corpus. Requires OPENAI_API_KEY. Never run for this repo's "
+        "published numbers."
     )
-    parser.add_argument("--out", default="results_api.json")
-    parser.add_argument("--model", default="text-embedding-3-small")
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        action="append",
+        dest="corpus_dirs",
+        metavar="PATH",
+        help="Directory of markdown files to embed. Repeatable. Defaults "
+        "to the in-repo sample_corpus/ directory if omitted.",
+    )
+    parser.add_argument(
+        "--out",
+        default="results_api.json",
+        metavar="PATH",
+        help="Where to write the JSON results (default: results_api.json).",
+    )
+    parser.add_argument(
+        "--model",
+        default="text-embedding-3-small",
+        help="OpenAI embedding model to call (default: text-embedding-3-small).",
+    )
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -91,7 +113,8 @@ def main():
             "once OPENAI_API_KEY is set and you intend to spend real money."
         )
 
-    documents = [c.text for c in load_corpus()]
+    corpus_dirs = args.corpus_dirs or [DEFAULT_CORPUS_DIR]
+    documents = [c.text for c in load_corpus(corpus_dirs)]
     result = run_external_api(documents, model=args.model)
 
     print(f"{result.model}: {result.documents_per_second:.2f} docs/sec, "
