@@ -1,30 +1,22 @@
 """
 corpus.py
 
-Loads the real document corpus for this benchmark: every markdown file in
-/Users/apple/Downloads/articles/ and /Users/apple/Downloads/aihive-posts-ready/.
-These are this project's own Qdrant Stars article drafts and their published
-versions (same five pieces, draft and publish-ready copies), used as-is
-because they're real prose sitting on disk, not text generated for this repo.
-To point this at a different corpus, edit CORPUS_DIRS below to your own
-directory of markdown files; nothing else in this module is corpus-specific.
+Loads and chunks a directory (or directories) of markdown files. Which
+directories to load is a caller decision, not a module-level constant: see
+`load_corpus(dirs)` below and `run_local_benchmark.py --corpus-dir` for how
+callers point this at a corpus. This module has no default corpus and no
+machine-specific paths baked in.
 
-No synthetic text anywhere in this file. Chunking is paragraph-based: walk
-each document's paragraphs in order and pack them into a chunk until adding
-the next paragraph would push the chunk over MAX_WORDS, then start a new
-chunk. A single paragraph longer than MAX_WORDS (this corpus has a few,
-mostly fenced code blocks) is kept whole rather than cut mid-sentence, so
-chunk length is a target, not a hard cap.
+Chunking is paragraph-based: walk each document's paragraphs in order and
+pack them into a chunk until adding the next paragraph would push the chunk
+over MAX_WORDS, then start a new chunk. A single paragraph longer than
+MAX_WORDS (e.g. a large fenced code block) is kept whole rather than cut
+mid-sentence, so chunk length is a target, not a hard cap.
 """
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
-
-CORPUS_DIRS = [
-    Path("/Users/apple/Downloads/articles"),
-    Path("/Users/apple/Downloads/aihive-posts-ready"),
-]
 
 MIN_WORDS = 200
 MAX_WORDS = 400
@@ -118,9 +110,19 @@ def chunk_document(source_file: str, text: str) -> list[Chunk]:
     return chunks
 
 
-def load_corpus() -> list[Chunk]:
+def load_corpus(dirs: list[Path]) -> list[Chunk]:
+    """Loads and chunks every ``*.md`` file in each of ``dirs``.
+
+    Args:
+        dirs: Directories to scan for markdown files. Each directory is
+            scanned non-recursively (``directory.glob("*.md")``); pass
+            multiple directories to combine several sources into one corpus.
+
+    Returns:
+        All chunks from all files, in directory order then filename order.
+    """
     all_chunks: list[Chunk] = []
-    for directory in CORPUS_DIRS:
+    for directory in dirs:
         for path in sorted(directory.glob("*.md")):
             text = path.read_text(encoding="utf-8")
             all_chunks.extend(chunk_document(str(path), text))
@@ -128,8 +130,26 @@ def load_corpus() -> list[Chunk]:
 
 
 if __name__ == "__main__":
-    chunks = load_corpus()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Load and chunk a markdown corpus, print summary stats."
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        action="append",
+        dest="corpus_dirs",
+        metavar="PATH",
+        help="Directory of markdown files to load. Repeatable. "
+        "Defaults to the in-repo sample_corpus/ directory if omitted.",
+    )
+    args = parser.parse_args()
+    corpus_dirs = args.corpus_dirs or [Path("sample_corpus")]
+
+    chunks = load_corpus(corpus_dirs)
     total_words = sum(c.word_count for c in chunks)
     print(f"{len(chunks)} chunks from {len(set(c.source_file for c in chunks))} files")
     print(f"{total_words} total words")
-    print(f"{total_words / len(chunks):.0f} avg words/chunk")
+    if chunks:
+        print(f"{total_words / len(chunks):.0f} avg words/chunk")
