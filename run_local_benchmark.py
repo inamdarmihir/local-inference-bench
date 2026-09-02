@@ -16,6 +16,12 @@ With no --corpus-dir given, this defaults to the in-repo sample_corpus/
 directory, never a machine-specific path. See README.md for how this
 in-repo sample corpus differs from the corpus used for the published
 results_local.json / results_local_warm.json numbers.
+
+The output JSON's "corpus" section includes a real tiktoken "num_tokens"
+count (see tokens.py), so cost_comparison.py can price a run entirely from
+this file, without needing the original markdown to still be on disk. The
+committed results_local.json / results_local_warm.json predate this field
+and don't have it; see README.md.
 """
 
 import argparse
@@ -30,6 +36,7 @@ from pathlib import Path
 from fastembed import TextEmbedding
 
 from corpus import load_corpus
+from tokens import TOKENIZER_MODEL, count_tokens
 
 DEFAULT_CORPUS_DIR = Path("sample_corpus")
 
@@ -134,6 +141,7 @@ def main() -> None:
         )
     documents = [c.text for c in chunks]
     total_words = sum(c.word_count for c in chunks)
+    num_tokens = count_tokens(documents)
 
     dirs_desc = ", ".join(str(d) for d in corpus_dirs)
     print(f"Loaded {len(documents)} chunks from {dirs_desc}, {total_words} total words")
@@ -153,6 +161,8 @@ def main() -> None:
         "corpus": {
             "num_chunks": len(chunks),
             "total_words": total_words,
+            "num_tokens": num_tokens,
+            "tokenizer_model": TOKENIZER_MODEL,
             "num_source_files": len(set(c.source_file for c in chunks)),
             "corpus_dirs": [str(d) for d in corpus_dirs],
         },

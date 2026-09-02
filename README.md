@@ -17,7 +17,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 python3 run_local_benchmark.py --corpus-dir sample_corpus --out results_local_sample.json
-python3 cost_comparison.py --corpus-dir sample_corpus results_local_sample.json
+python3 cost_comparison.py --results results_local_sample.json
 ```
 
 **`sample_corpus/` is not the corpus behind the published numbers below.**
@@ -28,6 +28,14 @@ cost than `results_local.json` / `results_local_warm.json`. See
 [§3](#3-run-this-against-your-own-corpus) to point the same commands at a
 real corpus of your own, and [§2](#2-reproduce--inspect-the-published-numbers)
 for the numbers that were actually published for this repo.
+
+`cost_comparison.py --results` runs fully offline: `run_local_benchmark.py`
+writes a real tiktoken `num_tokens` count into its output JSON's `corpus`
+section, so `cost_comparison.py` never needs the markdown files themselves,
+only that JSON. Only pass `--corpus-dir` to `cost_comparison.py` as a
+fallback, for older results files (like the committed
+`results_local_warm.json`) that predate `num_tokens` — see
+[§2](#2-reproduce--inspect-the-published-numbers).
 
 Run `python3 run_local_benchmark.py --help` and `python3 cost_comparison.py
 --help` for the full flag list.
@@ -48,7 +56,18 @@ No re-run is required to inspect them:
   unedited output of the second (warm) run against the same corpus.
 - The "What was actually measured" and "Cost comparison" sections below
   are computed from those two files and from the cited pricing in
-  `cost_comparison.py`; nothing there was re-run to write this README.
+  `pricing.py`; nothing there was re-run to write this README.
+
+Both files predate the `num_tokens` field (see [§1](#1-run-this-on-your-machine)),
+since they were written before `run_local_benchmark.py` tracked token
+counts, and they're kept byte-for-byte as originally written — not
+backfilled. `cost_comparison.py --results results_local_warm.json` on its
+own will tell you exactly that and stop, rather than silently loading a
+corpus that isn't in this repo. Mihir can still price them locally with
+`cost_comparison.py --results results_local_warm.json --corpus-dir
+/path/to/that/original/corpus`; a clone can't, since that corpus was
+never checked in, which is exactly why the numbers above are quoted
+directly instead.
 
 ## 3. Run this against your own corpus
 
@@ -57,7 +76,7 @@ directories of markdown files:
 
 ```bash
 python3 run_local_benchmark.py --corpus-dir path/to/your/docs --out results_local.json
-python3 cost_comparison.py --corpus-dir path/to/your/docs results_local.json
+python3 cost_comparison.py --results results_local.json
 ```
 
 Chunking is paragraph-based with a 200-400 word target, generic to any
@@ -80,9 +99,11 @@ apples.
 
 ```
 corpus.py                 loads and chunks a markdown corpus (CLI: --corpus-dir)
-run_local_benchmark.py    runs FastEmbed locally against it, times the run
+tokens.py                 shared tiktoken counting, used by run_local_benchmark.py and cost_comparison.py
+pricing.py                shared cited OpenAI/AWS prices, used by cost_comparison.py and run_external_api.py
+run_local_benchmark.py    runs FastEmbed locally against it, times the run, records num_tokens
 run_external_api.py       the OpenAI-side script, real code, not run for the published numbers (no API key)
-cost_comparison.py        combines local numbers with cited API pricing, tags each figure's source
+cost_comparison.py        prices a results JSON's numbers against cited pricing, offline, tags each figure's source
 sample_corpus/            6 short original markdown files, for clone-and-run only (not the published corpus)
 results_local.json        actual output of the first (cold) published run, checked in
 results_local_warm.json   actual output of the second (warm) published run, checked in
@@ -156,9 +177,10 @@ them labeled separately rather than blending them into one table.
 (`measured`, `cited`, `projected`, or `measured+cited`) on every numeric
 group in its JSON output for exactly this reason.
 
-- **Measured**: local wall-clock and throughput, actually run on real
-  hardware against a real corpus (the "What was actually measured" section
-  above, or your own `--corpus-dir` run).
+- **Measured**: local wall-clock, throughput, and token count, actually
+  run on real hardware against a real corpus (the "What was actually
+  measured" section above, or your own `run_local_benchmark.py
+  --corpus-dir` run).
 - **Cited**: the $0.02/1M token OpenAI price and the $0.145/hr AWS price,
   both published rates checked 2026-09-01, linked above. Neither was
   independently reproduced by a live call in this environment.
