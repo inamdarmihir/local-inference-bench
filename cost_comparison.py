@@ -1,73 +1,97 @@
 """
 cost_comparison.py
 
-Combines a real, locally measured FastEmbed throughput number (from
-run_local_benchmark.py's JSON output) with cited, dated external prices for
-OpenAI's API and a comparable rented cloud CPU instance, to compare local
-vs. hosted embedding cost. Every number printed or written is tagged as
-"measured" (this machine, this run), "cited" (external, dated, not
-reproduced here), or "projected" (linear extrapolation of a measured rate),
-so the three are never blended into one unlabeled figure.
+Prices a local FastEmbed run against cited hosted-API costs. The normal
+path reads everything it needs — num_chunks, num_tokens,
+wall_clock_seconds, documents_per_second — straight out of a
+run_local_benchmark.py results JSON via --results, fully offline, with no
+need for the original markdown corpus to exist on this machine.
 
-Sources, checked 2026-09-01:
-  - OpenAI text-embedding-3-small price: $0.02 / 1M tokens.
-    https://platform.openai.com/docs/models/text-embedding-3-small
-  - AWS EC2 c7g.xlarge (4 vCPU, 8 GiB, Graviton3) on-demand price:
-    $0.145/hr, us-east-1. https://instances.vantage.sh/aws/ec2/c7g.xlarge
-    Picked as a roughly comparable small CPU instance, not an exact
-    hardware match to whatever machine produced the local numbers.
+--results must point at a file written by the current run_local_
+benchmark.py to use that offline path: it records "num_tokens" (via
+tokens.py) alongside "total_words". Files written before that field
+existed, including this repo's own committed results_local.json /
+results_local_warm.json, don't have it. For those, pass --corpus-dir
+pointing at the exact corpus that produced the file, and this script will
+load and tokenize it instead — the only case where markdown is read.
+Otherwise, see README.md for the published numbers directly.
+
+Every number printed or written is tagged with an explicit "source":
+"measured" (this machine's recorded local run), "cited" (external, dated
+pricing, from pricing.py), "projected" (linear extrapolation to a larger
+corpus), or "measured+cited" (cost figures that combine the two), so a
+reader can't blend them.
 """
 
 import argparse
 import json
 from pathlib import Path
 
-import tiktoken
-
-from corpus import load_corpus
-
-DEFAULT_CORPUS_DIR = Path("sample_corpus")
-
-# --- cited, dated external numbers (not measured on this machine) ---
-OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS = 0.02
-OPENAI_PRICING_SOURCE = "https://platform.openai.com/docs/models/text-embedding-3-small"
-OPENAI_PRICING_CHECKED_DATE = "2026-09-01"
-
-AWS_C7G_XLARGE_USD_PER_HOUR = 0.145
-AWS_PRICING_SOURCE = "https://instances.vantage.sh/aws/ec2/c7g.xlarge"
-AWS_PRICING_CHECKED_DATE = "2026-09-01"
-
-TOKENIZER_MODEL = "text-embedding-3-small"  # tiktoken maps this to cl100k_base
+from pricing import AWS_C7G_XLARGE, OPENAI_TEXT_EMBEDDING_3_SMALL
+from tokens import count_tokens
 
 
-def real_token_count(documents: list[str]) -> int:
-    """Real tokenizer, real corpus. cl100k_base is the encoding
-    tiktoken.encoding_for_model('text-embedding-3-small') actually
-    returns on the installed tiktoken (checked this session), which is
-    the correct encoding for that model, not an approximation."""
-    enc = tiktoken.encoding_for_model(TOKENIZER_MODEL)
-    return sum(len(enc.encode(doc)) for doc in documents)
-
-
-def load_local_results(path: str) -> dict:
+def load_results(path: str) -> dict:
     with open(path) as f:
         return json.load(f)
 
 
+def resolve_num_chunks_and_tokens(
+    local: dict, results_path: str, corpus_dirs: list[Path] | None
+) -> tuple[int, int]:
+    """Returns (num_chunks, num_tokens), preferring the values already
+    recorded in the results JSON (fully offline) and falling back to
+    loading --corpus-dir and re-tokenizing only if the JSON predates
+    'num_tokens'.
+    """
+    corpus = local.get("corpus", {})
+    num_chunks = corpus.get("num_chunks")
+    num_tokens = corpus.get("num_tokens")
+
+    if num_chunks is not None and num_tokens is not None:
+        return num_chunks, num_tokens
+
+    if not corpus_dirs:
+        raise SystemExit(
+            f"{results_path} has no 'num_tokens' in its 'corpus' section. "
+            f"This is expected for files written before token counts were "
+            f"tracked, including this repo's committed results_local.json "
+            f"and results_local_warm.json. Pass --corpus-dir pointing at "
+            f"the exact corpus that produced {results_path} so tokens can "
+            f"be counted from the markdown directly, or see README.md for "
+            f"the published numbers without needing that corpus at all."
+        )
+
+    from corpus import load_corpus  # only needed for this fallback path
+
+    chunks = load_corpus(corpus_dirs)
+    if num_chunks is not None and num_chunks != len(chunks):
+        print(
+            f"warning: {results_path} was measured against {num_chunks} "
+            f"chunks, but {[str(d) for d in corpus_dirs]} produced "
+            f"{len(chunks)} chunks just now. The token count below may not "
+            f"match the corpus that actually produced {results_path}'s "
+            f"throughput numbers.\n"
+        )
+    documents = [c.text for c in chunks]
+    return len(chunks), count_tokens(documents)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare measured local FastEmbed cost against cited "
-        "hosted-API pricing for the same corpus."
+        description="Compare a run_local_benchmark.py results file's "
+        "measured cost against cited hosted-API pricing. Runs fully "
+        "offline when --results already has 'num_tokens'."
     )
     parser.add_argument(
-        "local_results",
-        nargs="?",
-        default="results_local_warm.json",
-        metavar="LOCAL_RESULTS_JSON",
+        "--results",
+        default="results_local.json",
+        metavar="PATH",
         help="Path to a JSON file written by run_local_benchmark.py "
-        "(default: results_local_warm.json, the published warm-run "
-        "numbers). Must be measured against the same corpus passed to "
-        "--corpus-dir, or the token count and throughput won't match.",
+        "(default: results_local.json). If it includes a 'num_tokens' "
+        "field, this runs fully offline with no corpus needed. Older "
+        "files without that field (e.g. this repo's committed "
+        "results_local_warm.json) need --corpus-dir instead.",
     )
     parser.add_argument(
         "--corpus-dir",
@@ -75,9 +99,10 @@ def main() -> None:
         action="append",
         dest="corpus_dirs",
         metavar="PATH",
-        help="Directory of markdown files to count tokens for. Repeatable. "
-        "Defaults to the in-repo sample_corpus/ directory if omitted; use "
-        "the same --corpus-dir you passed to run_local_benchmark.py.",
+        help="Directory of markdown files to tokenize. Only used as a "
+        "fallback when --results has no 'num_tokens' field; ignored "
+        "otherwise. Repeatable. Must be the same corpus that produced "
+        "--results, or the token count won't match its throughput numbers.",
     )
     parser.add_argument(
         "--out",
@@ -88,47 +113,30 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    local_results_path = args.local_results
     try:
-        local = load_local_results(local_results_path)
+        local = load_results(args.results)
     except FileNotFoundError:
         raise SystemExit(
-            f"{local_results_path} not found. Run run_local_benchmark.py "
-            f"first (it writes results_local.json by default), then pass "
-            f"that path here."
-        )
-
-    corpus_dirs = args.corpus_dirs or [DEFAULT_CORPUS_DIR]
-    chunks = load_corpus(corpus_dirs)
-    documents = [c.text for c in chunks]
-    total_tokens = real_token_count(documents)
-
-    published_num_chunks = local.get("corpus", {}).get("num_chunks")
-    if published_num_chunks is not None and published_num_chunks != len(chunks):
-        print(
-            f"warning: {local_results_path} was measured against "
-            f"{published_num_chunks} chunks, but {[str(d) for d in corpus_dirs]} "
-            f"produced {len(chunks)} chunks. Token counts and cost below are "
-            f"computed from the corpus you pointed --corpus-dir at, not the "
-            f"corpus that produced {local_results_path}'s throughput numbers. "
-            f"Pass the matching --corpus-dir for an apples-to-apples "
-            f"comparison, e.g. the --corpus-dir you gave run_local_benchmark.py.\n"
+            f"{args.results} not found. Run run_local_benchmark.py first "
+            f"(it writes results_local.json by default), then pass that "
+            f"path here with --results."
         )
 
     bench = local["benchmark"]
+    num_chunks, total_tokens = resolve_num_chunks_and_tokens(
+        local, args.results, args.corpus_dirs
+    )
+
     docs_per_second = bench["documents_per_second"]
     wall_clock = bench["wall_clock_seconds"]
 
-    api_cost_this_corpus = (
-        total_tokens / 1_000_000
-    ) * OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS
-
-    local_cost_rented_compute = (wall_clock / 3600) * AWS_C7G_XLARGE_USD_PER_HOUR
+    api_cost_this_corpus = (total_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
+    local_cost_rented_compute = (wall_clock / 3600) * AWS_C7G_XLARGE.usd
 
     print("=" * 72)
-    print("MEASURED (this machine, this corpus, this run)")
+    print("MEASURED (recorded in --results, this machine's run)")
     print("=" * 72)
-    print(f"corpus:                 {len(chunks)} chunks, {total_tokens} tokens (cl100k_base)")
+    print(f"corpus:                 {num_chunks} chunks, {total_tokens} tokens (cl100k_base)")
     print(f"local model:            {bench['model_name']} via FastEmbed")
     print(f"local wall clock:       {wall_clock:.3f}s ({docs_per_second:.2f} docs/sec)")
     print(f"local hardware:         {bench['cpu_brand']} ({bench['cpu_cores']} cores)")
@@ -139,24 +147,25 @@ def main() -> None:
     print("=" * 72)
     print(
         f"OpenAI text-embedding-3-small: "
-        f"${OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS}/1M tokens "
-        f"({OPENAI_PRICING_SOURCE}, checked {OPENAI_PRICING_CHECKED_DATE})"
+        f"${OPENAI_TEXT_EMBEDDING_3_SMALL.usd} {OPENAI_TEXT_EMBEDDING_3_SMALL.unit} "
+        f"({OPENAI_TEXT_EMBEDDING_3_SMALL.source}, checked "
+        f"{OPENAI_TEXT_EMBEDDING_3_SMALL.checked_date})"
     )
     print(
-        f"AWS c7g.xlarge on-demand: ${AWS_C7G_XLARGE_USD_PER_HOUR}/hr "
-        f"({AWS_PRICING_SOURCE}, checked {AWS_PRICING_CHECKED_DATE})"
+        f"AWS c7g.xlarge on-demand: ${AWS_C7G_XLARGE.usd} {AWS_C7G_XLARGE.unit} "
+        f"({AWS_C7G_XLARGE.source}, checked {AWS_C7G_XLARGE.checked_date})"
     )
     print()
 
     print("=" * 72)
-    print(f"COST AT THIS CORPUS'S ACTUAL SIZE ({total_tokens} tokens, {len(chunks)} chunks)")
+    print(f"COST AT THIS CORPUS'S ACTUAL SIZE ({total_tokens} tokens, {num_chunks} chunks)")
     print("=" * 72)
     print(f"API cost (OpenAI, cited rate):              ${api_cost_this_corpus:.6f}")
     print(f"local cost, already-owned machine:           $0.00 (marginal cost)")
     print(
         f"local cost, if renting equivalent compute:   "
         f"${local_cost_rented_compute:.6f} "
-        f"({wall_clock:.2f}s of ${AWS_C7G_XLARGE_USD_PER_HOUR}/hr compute)"
+        f"({wall_clock:.2f}s of ${AWS_C7G_XLARGE.usd}/hr compute)"
     )
     print(
         "\nAt this corpus size the API cost is a fraction of a cent either "
@@ -168,17 +177,15 @@ def main() -> None:
     # --- projection, explicitly labeled as a projection, not a new measurement ---
     projections: list[dict] = []
     for scale_docs in (10_000, 1_000_000):
-        scale_factor = scale_docs / len(chunks)
+        scale_factor = scale_docs / num_chunks
         proj_tokens = total_tokens * scale_factor
-        proj_api_cost = (
-            proj_tokens / 1_000_000
-        ) * OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS
+        proj_api_cost = (proj_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
         proj_local_seconds = scale_docs / docs_per_second
-        proj_local_rented_cost = (proj_local_seconds / 3600) * AWS_C7G_XLARGE_USD_PER_HOUR
+        proj_local_rented_cost = (proj_local_seconds / 3600) * AWS_C7G_XLARGE.usd
 
         print(
             f"PROJECTION to {scale_docs:,} chunks (linear scaling of the "
-            f"measured {docs_per_second:.2f} docs/sec and {total_tokens/len(chunks):.0f} "
+            f"measured {docs_per_second:.2f} docs/sec and {total_tokens/num_chunks:.0f} "
             f"avg tokens/chunk, not a new run):"
         )
         print(f"  projected tokens:                    {proj_tokens:,.0f}")
@@ -188,7 +195,7 @@ def main() -> None:
             f"({proj_local_seconds:,.0f}s)"
         )
         print(
-            f"  projected local cost (rented, {AWS_C7G_XLARGE_USD_PER_HOUR}/hr):  "
+            f"  projected local cost (rented, {AWS_C7G_XLARGE.usd}/hr):  "
             f"${proj_local_rented_cost:,.2f}"
         )
         print(
@@ -224,10 +231,9 @@ def main() -> None:
         out = {
             "corpus": {
                 "source": "measured",
-                "num_chunks": len(chunks),
-                "total_tokens": total_tokens,
-                "corpus_dirs": [str(d) for d in corpus_dirs],
-                "local_results_file": local_results_path,
+                "num_chunks": num_chunks,
+                "num_tokens": total_tokens,
+                "results_file": args.results,
             },
             "local_benchmark": {
                 "source": "measured",
@@ -239,12 +245,12 @@ def main() -> None:
             },
             "cited_pricing": {
                 "source": "cited",
-                "openai_usd_per_1m_tokens": OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS,
-                "openai_pricing_source": OPENAI_PRICING_SOURCE,
-                "openai_pricing_checked_date": OPENAI_PRICING_CHECKED_DATE,
-                "aws_c7g_xlarge_usd_per_hour": AWS_C7G_XLARGE_USD_PER_HOUR,
-                "aws_pricing_source": AWS_PRICING_SOURCE,
-                "aws_pricing_checked_date": AWS_PRICING_CHECKED_DATE,
+                "openai_usd_per_1m_tokens": OPENAI_TEXT_EMBEDDING_3_SMALL.usd,
+                "openai_pricing_source": OPENAI_TEXT_EMBEDDING_3_SMALL.source,
+                "openai_pricing_checked_date": OPENAI_TEXT_EMBEDDING_3_SMALL.checked_date,
+                "aws_c7g_xlarge_usd_per_hour": AWS_C7G_XLARGE.usd,
+                "aws_pricing_source": AWS_C7G_XLARGE.source,
+                "aws_pricing_checked_date": AWS_C7G_XLARGE.checked_date,
             },
             "cost_at_corpus_size": {
                 "source": "measured+cited",

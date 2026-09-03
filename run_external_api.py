@@ -26,13 +26,9 @@ from pathlib import Path
 from openai import OpenAI
 
 from corpus import load_corpus
+from pricing import OPENAI_TEXT_EMBEDDING_3_SMALL
 
 DEFAULT_CORPUS_DIR = Path("sample_corpus")
-
-# Cited, dated. See cost_comparison.py for the source and check date.
-# Kept here too so this script's own cost math doesn't depend on importing
-# from a file most people won't read before running a billed call.
-OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS = 0.02
 
 
 @dataclass
@@ -61,7 +57,7 @@ def run_external_api(
         total_tokens += response.usage.total_tokens
     elapsed = time.perf_counter() - start
 
-    cost = (total_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL_USD_PER_1M_TOKENS
+    cost = (total_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
 
     return ApiBenchmarkResult(
         model=model,
