@@ -1,0 +1,49 @@
+name: smoke test
+
+# Runs the clone-and-run demo pipeline against the in-repo sample_corpus/
+# only. This is a pipeline smoke test, not a benchmark: it does not assert
+# on, reproduce, or compare against the published results_local.json /
+# results_local_warm.json numbers, which came from a corpus that isn't in
+# this repo (see README.md). It just proves a fresh clone + pip install +
+# run_local_benchmark.py + cost_comparison.py + push_to_qdrant.py all work.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FastEmbed against sample_corpus/
+        run: |
+          python3 run_local_benchmark.py --corpus-dir sample_corpus \
+            --out results_local_sample.json
+
+      - name: Price the sample run (offline, cited pricing only)
+        run: |
+          python3 cost_comparison.py --results results_local_sample.json
+
+      - name: Push sample_corpus into an in-memory Qdrant collection
+        run: |
+          python3 push_to_qdrant.py --corpus-dir sample_corpus \
+            --query "how does chunking work?"
+
+      - name: Sanity-check corpus.py's chunker on its own
+        run: python3 corpus.py --corpus-dir sample_corpus
