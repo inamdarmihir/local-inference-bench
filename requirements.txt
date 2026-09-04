@@ -1,3 +1,12 @@
+# Pinned so a clone-and-run today reproduces the same behavior this repo
+# was built and tested against, not "whatever is newest on PyPI."
+# Tested with Python 3.10-3.13 (published numbers were run on 3.13.15; CI
+# and sandbox verification below used 3.12.3). See README.md "Versions" section.
 fastembed==0.8.0
 openai==3.6.0
 tiktoken==0.14.0
+
+# Optional: only needed for push_to_qdrant.py (demonstrates the embedded
+# chunks in an actual Qdrant collection, in-memory, no server required).
+# Not imported by run_local_benchmark.py or cost_comparison.py.
+qdrant-client==1.15.1
