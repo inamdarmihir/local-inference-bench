@@ -50,6 +50,7 @@ Running an embedding model next to Qdrant instead of calling an external API for
 
 ## Contents
 
+- [Data and ground truth](#data-and-ground-truth)
 - [Published results](#published-results)
 - [Quickstart](#quickstart)
 - [Inspect the published numbers](#inspect-the-published-numbers)
@@ -63,6 +64,23 @@ Running an embedding model next to Qdrant instead of calling an external API for
 - [Repository layout](#repository-layout)
 - [Versions](#versions)
 - [Development](#development)
+
+## Data and ground truth
+
+**This repo has no labeled benchmark dataset, because it does not measure answer or retrieval quality.** It measures embedding throughput and prices it. The "ground truth" is therefore hardware timings and published prices.
+
+| Item | Source | Notes |
+| --- | --- | --- |
+| Published-run corpus (38 chunks, 8,091 words, 13,111 tokens) | The author's own markdown article drafts | **Private and not committed.** The published numbers are inspect-only; see [Inspect the published numbers](#inspect-the-published-numbers). Unedited outputs are in [`results_local.json`](results_local.json) and [`results_local_warm.json`](results_local_warm.json). |
+| Demo corpus | [`sample_corpus/`](sample_corpus/) | 6 short original files written for this repo. For trying the pipeline only. |
+| GPU leg corpus | [`kubernetes/website`](https://github.com/kubernetes/website) docs, CC-BY-4.0 (as stated in the notebook) | Fetched by the Colab notebook at run time; not committed. |
+| Embedding model | [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) via [FastEmbed](https://github.com/qdrant/fastembed) | Default FastEmbed model, `fastembed==0.8.0`. |
+| Token counts | [tiktoken](https://github.com/openai/tiktoken), `cl100k_base` | Real tokenizer, not an estimate. |
+| OpenAI price ($0.02 per 1M tokens) | [OpenAI model page](https://platform.openai.com/docs/models/text-embedding-3-small) | Cited, checked 2026-09-01. Prices change; re-check before reuse. |
+| AWS price ($0.145/hr, `c7g.xlarge`, us-east-1) | [Vantage instance page](https://instances.vantage.sh/aws/ec2/c7g.xlarge) | Cited, checked 2026-09-01. |
+| API latency context | Zep, [*Text embedding latency: a semi-scientific look*](https://blog.getzep.com/text-embedding-latency-a-semi-scientific-look/) | Related data point only; different models. No API latency was measured here. |
+
+**Real vs derived.** Timings, throughput and token counts are measured. Prices are cited. The 10k and 1M-chunk figures are linear projections and are labeled as such. No OpenAI API call was ever made for the published numbers.
 
 ## Published results
 
