@@ -1,14 +1,23 @@
-# Local Inference Bench
+# ⏱️ Local Inference Bench: Measure Local Embedding Throughput Before Deciding What It Costs
 
-**Measure local embedding throughput before deciding what it costs.**
+> **Times FastEmbed on your Markdown corpus, then prices it with dated, cited rates. Local inference is measured; the OpenAI API is not benchmarked in the committed results.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/inamdarmihir/local-inference-bench)](https://github.com/inamdarmihir/local-inference-bench/commits/main)
+
+---
+
+## 🚀 What Is This?
 
 This repo times FastEmbed on your Markdown corpus, records the hardware and vector dimensions, then calculates a cost comparison using dated API and compute prices. An optional Qdrant demo inserts the vectors and runs a similarity query.
 
 The important boundary: **local inference was measured; the OpenAI API was not benchmarked for the committed results.** API cost is calculated from cited pricing. API latency and retrieval-quality equivalence are not established here.
 
-[Quickstart](#quickstart) · [Committed results](#committed-results) · [Your own corpus](#your-own-corpus) · [Limits](#limits) · [Article](https://aihive.hashnode.dev/fastembed-vs-openai-embedding-cost-qdrant-docs)
+[Quickstart](#-quick-start) · [Committed results](#-committed-results) · [Your own corpus](#-your-own-corpus) · [Limits](#-limits) · [Article](https://aihive.hashnode.dev/fastembed-vs-openai-embedding-cost-qdrant-docs)
 
-## Quickstart
+---
+
+## ⚡ Quick Start
 
 Use Python with virtual-environment support and internet access for dependency and model downloads. Pinned dependencies are in [`requirements.txt`](requirements.txt).
 
@@ -30,7 +39,9 @@ make qdrant-demo
 
 This uses `QdrantClient(":memory:")` by default. It demonstrates insertion and a similarity query, not retrieval accuracy. A server is not required for this path.
 
-## Committed results
+---
+
+## 📊 Committed Results
 
 The two JSON files contain runs on an Apple M2, eight cores, with `BAAI/bge-small-en-v1.5`, 384 dimensions and FastEmbed batch size 256. The corpus contained 38 chunks and 8,091 words across ten source files.
 
@@ -43,7 +54,9 @@ Sources: [`results_local.json`](results_local.json) and [`results_local_warm.jso
 
 **These measurements are inspectable, not exactly reproducible from this checkout.** The original 38-chunk corpus is not committed. The JSON also predates token-count recording, so it cannot independently reproduce the original token-priced comparison. The linked September article describes a larger run; that run's raw artifacts are not in this checkout, and its numbers are not substituted into this table.
 
-## Your own corpus
+---
+
+## 🧩 Your Own Corpus
 
 ```bash
 source .venv/bin/activate
@@ -80,7 +93,9 @@ An already-owned machine can avoid a per-request API bill, but electricity, hard
 
 Do not infer equal quality from equal vector dimensions. A ranking comparison needs the same retrieval task and relevance judgments.
 
-## Project map
+---
+
+## 🗂️ Project Map
 
 | File | Purpose |
 | --- | --- |
@@ -93,7 +108,9 @@ Do not infer equal quality from equal vector dimensions. A ranking comparison ne
 | `sample_corpus/` | Small original demo documents |
 | `results_local*.json` | Older measured outputs |
 
-## Limits
+---
+
+## ⚠️ Limits
 
 - The committed corpus is small and unavailable in git. Its throughput is not a production-capacity claim.
 - No committed API latency, recall comparison, concurrency test or tuned hardware comparison.
@@ -101,10 +118,14 @@ Do not infer equal quality from equal vector dimensions. A ranking comparison ne
 - `tokens.py` uses tiktoken's default special-token handling. Markdown containing reserved token strings can raise an error; this README does not claim that code issue is fixed.
 - The Qdrant demo proves insertability and search execution, not answer quality.
 
-## Contributing
+---
+
+## 🤝 Contributing
 
 Useful additions are a redistributable real corpus, raw artifacts for the larger article run, safer special-token handling and paired retrieval-quality evaluation. Keep billed API runs optional and preserve the measured/cited/projected distinction.
 
-## License
+---
+
+## 📄 License
 
 [MIT](LICENSE).
