@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 results_api.json
 results_local_sample.json
+.pytest_cache/

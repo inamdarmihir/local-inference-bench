@@ -77,6 +77,36 @@ def resolve_num_chunks_and_tokens(
     return len(chunks), count_tokens(documents)
 
 
+def api_cost_usd(total_tokens: float) -> float:
+    """OpenAI API cost for ``total_tokens`` at the cited rate."""
+    return (total_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
+
+
+def rented_compute_cost_usd(seconds: float) -> float:
+    """Cost of running for ``seconds`` on the cited AWS c7g.xlarge rate."""
+    return (seconds / 3600) * AWS_C7G_XLARGE.usd
+
+
+def project_to_scale(
+    num_chunks: int, total_tokens: int, docs_per_second: float, scale_docs: int
+) -> dict:
+    """Linearly extrapolate a measured run to ``scale_docs`` chunks.
+
+    This is a projection, not a new measurement, and is tagged as such.
+    """
+    proj_tokens = total_tokens * (scale_docs / num_chunks)
+    proj_local_seconds = scale_docs / docs_per_second
+    return {
+        "source": "projected",
+        "scale_docs": scale_docs,
+        "projected_tokens": proj_tokens,
+        "projected_api_cost_usd": api_cost_usd(proj_tokens),
+        "projected_local_seconds": proj_local_seconds,
+        "projected_local_rented_cost_usd": rented_compute_cost_usd(proj_local_seconds),
+        "projected_local_owned_cost_usd": 0.0,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare a run_local_benchmark.py results file's "
@@ -130,8 +160,8 @@ def main() -> None:
     docs_per_second = bench["documents_per_second"]
     wall_clock = bench["wall_clock_seconds"]
 
-    api_cost_this_corpus = (total_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
-    local_cost_rented_compute = (wall_clock / 3600) * AWS_C7G_XLARGE.usd
+    api_cost_this_corpus = api_cost_usd(total_tokens)
+    local_cost_rented_compute = rented_compute_cost_usd(wall_clock)
 
     print("=" * 72)
     print("MEASURED (recorded in --results, this machine's run)")
@@ -177,11 +207,11 @@ def main() -> None:
     # --- projection, explicitly labeled as a projection, not a new measurement ---
     projections: list[dict] = []
     for scale_docs in (10_000, 1_000_000):
-        scale_factor = scale_docs / num_chunks
-        proj_tokens = total_tokens * scale_factor
-        proj_api_cost = (proj_tokens / 1_000_000) * OPENAI_TEXT_EMBEDDING_3_SMALL.usd
-        proj_local_seconds = scale_docs / docs_per_second
-        proj_local_rented_cost = (proj_local_seconds / 3600) * AWS_C7G_XLARGE.usd
+        proj = project_to_scale(num_chunks, total_tokens, docs_per_second, scale_docs)
+        proj_tokens = proj["projected_tokens"]
+        proj_api_cost = proj["projected_api_cost_usd"]
+        proj_local_seconds = proj["projected_local_seconds"]
+        proj_local_rented_cost = proj["projected_local_rented_cost_usd"]
 
         print(
             f"PROJECTION to {scale_docs:,} chunks (linear scaling of the "
@@ -204,17 +234,7 @@ def main() -> None:
         )
         print()
 
-        projections.append(
-            {
-                "source": "projected",
-                "scale_docs": scale_docs,
-                "projected_tokens": proj_tokens,
-                "projected_api_cost_usd": proj_api_cost,
-                "projected_local_seconds": proj_local_seconds,
-                "projected_local_rented_cost_usd": proj_local_rented_cost,
-                "projected_local_owned_cost_usd": 0.0,
-            }
-        )
+        projections.append(proj)
 
     print("=" * 72)
     print("LATENCY: NOT INDEPENDENTLY MEASURED FOR THE API PATH")

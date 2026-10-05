@@ -31,6 +31,11 @@ jobs:
       - name: Install pinned dependencies
         run: pip install -r requirements.txt
 
+      - name: Unit tests
+        run: |
+          pip install pytest
+          pytest -q
+
       - name: Run FastEmbed against sample_corpus/
         run: |
           python3 run_local_benchmark.py --corpus-dir sample_corpus \
